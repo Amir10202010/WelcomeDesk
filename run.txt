@@ -1,23 +1,58 @@
 const int trigPin = 22;
 const int echoPin = 23;
 
-void setup() {
-  Serial.begin(9600);
-  pinMode(trigPin, OUTPUT);
-  pinMode(echoPin, INPUT);
-}
+const int ledPin = 9;
+const int buzzerPin = 8;
 
-void loop() {
+const int threshold = 50; // см
+
+long readDistanceCM() {
   digitalWrite(trigPin, LOW);
   delayMicroseconds(2);
+
   digitalWrite(trigPin, HIGH);
   delayMicroseconds(10);
   digitalWrite(trigPin, LOW);
 
   long duration = pulseIn(echoPin, HIGH, 30000);
+  if (duration == 0) return -1;
 
-  Serial.print("Duration: ");
-  Serial.println(duration);
+  return duration * 0.034 / 2;
+}
 
-  delay(500);
+void alarmMode() {
+  // один цикл мигания + звук
+  digitalWrite(ledPin, HIGH);
+  tone(buzzerPin, 2000);   // громкий высокий звук
+  delay(150);
+
+  digitalWrite(ledPin, LOW);
+  noTone(buzzerPin);
+  delay(150);
+}
+
+void setup() {
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+
+  pinMode(ledPin, OUTPUT);
+  pinMode(buzzerPin, OUTPUT);
+
+  Serial.begin(9600);
+}
+
+void loop() {
+  long d = readDistanceCM();
+
+  Serial.println(d);
+
+  // если человек рядом
+  if (d > 0 && d < threshold) {
+    alarmMode();  // бесконечно работает
+  } 
+  else {
+    digitalWrite(ledPin, LOW);
+    noTone(buzzerPin);
+    delay(200);
+  }
 }
