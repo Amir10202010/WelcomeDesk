@@ -1,0 +1,57 @@
+const int trigPin = 22;
+const int echoPin = 23;
+const int ledPin = 9;
+const int buzzerPin = 8;
+
+long readDistanceCM() {
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+
+  digitalWrite(trigPin, LOW);
+
+  long duration = pulseIn(echoPin, HIGH, 30000); // 30 ms timeout
+
+  if (duration == 0) return -1;
+
+  long distance = duration * 0.034 / 2;
+  return distance;
+}
+
+void welcomeEffect() {
+  for (int i = 0; i < 4; i++) {
+    digitalWrite(ledPin, HIGH);
+    tone(buzzerPin, 1000, 150);
+    delay(200);
+
+    digitalWrite(ledPin, LOW);
+    delay(200);
+  }
+}
+
+void setup() {
+  pinMode(trigPin, OUTPUT);
+  pinMode(echoPin, INPUT);
+  pinMode(ledPin, OUTPUT);
+  pinMode(buzzerPin, OUTPUT);
+
+  Serial.begin(9600);
+  Serial.println("System started");
+}
+
+void loop() {
+  long d = readDistanceCM();
+
+  Serial.print("Distance: ");
+  Serial.print(d);
+  Serial.println(" cm");
+
+  if (d != -1 && d < 50) {
+    welcomeEffect();
+    delay(5000);  // чтобы не срабатывало бесконечно
+  }
+
+  delay(300);
+}
