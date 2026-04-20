@@ -1,19 +1,28 @@
-#include <LiquidCrystal.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
 
-// LCD: RS, E, D4, D5, D6, D7
-LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
+// I2C LCD
+LiquidCrystal_I2C lcd(0x3F, 16, 2);
 
+// ====== PINS ======
 const int trigPin = 22;
 const int echoPin = 23;
-const int ledPin = 9;
 const int buzzerPin = 8;
+
+// RGB pins (Mega PWM)
+const int redPin = 6;
+const int greenPin = 9;
+const int bluePin = 10;
+
+// If your RGB is common anode, set true
+const bool commonAnode = false;
 
 const int triggerDistanceCm = 50;
 const int resetDistanceCm = 70;
 
 bool triggered = false;
 
-// ==== НОТЫ ====
+// ====== NOTES ======
 #define NOTE_B0  31
 #define NOTE_C1  33
 #define NOTE_CS1 35
@@ -108,7 +117,7 @@ bool triggered = false;
 int tempo = 144;
 int wholenote = (60000 * 4) / tempo;
 
-// Полная Hedwig's Theme
+// Full Hedwig's Theme
 int melody[] = {
   REST, 2, NOTE_D4, 4,
   NOTE_G4, -4, NOTE_AS4, 8, NOTE_A4, 4,
@@ -149,7 +158,71 @@ int melody[] = {
 
 int notes = sizeof(melody) / sizeof(melody[0]) / 2;
 
-// ==== ДАТЧИК РАССТОЯНИЯ ====
+// ====== LCD CUSTOM CHARS (from your animation) ======
+byte customChar1[] = {
+  0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F
+};
+
+byte customChar2[] = {
+  0x00, 0x00, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F
+};
+
+byte customChar3[] = {
+  0x00, 0x00, 0x00, 0x00, 0x1F, 0x1F, 0x1F, 0x1F
+};
+
+byte customChar4[] = {
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1F, 0x1F
+};
+
+byte customChar5[] = {
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+};
+
+int i = 0;
+int j = 0;
+int k = 0;
+int randomnum = 0;
+
+// ====== RGB ======
+void setRGB(int r, int g, int b) {
+  if (commonAnode) {
+    r = 255 - r;
+    g = 255 - g;
+    b = 255 - b;
+  }
+  analogWrite(redPin, r);
+  analogWrite(greenPin, g);
+  analogWrite(bluePin, b);
+}
+
+void rgbOff() {
+  setRGB(0, 0, 0);
+}
+
+void rgbPulse(int r, int g, int b, int stepsDelay = 4) {
+  for (int x = 0; x <= 255; x += 8) {
+    setRGB((r * x) / 255, (g * x) / 255, (b * x) / 255);
+    delay(stepsDelay);
+  }
+  for (int x = 255; x >= 0; x -= 8) {
+    setRGB((r * x) / 255, (g * x) / 255, (b * x) / 255);
+    delay(stepsDelay);
+  }
+}
+
+void colorStep(int step) {
+  switch (step % 6) {
+    case 0: setRGB(255, 0, 0); break;
+    case 1: setRGB(0, 255, 0); break;
+    case 2: setRGB(0, 0, 255); break;
+    case 3: setRGB(255, 255, 0); break;
+    case 4: setRGB(0, 255, 255); break;
+    case 5: setRGB(255, 0, 255); break;
+  }
+}
+
+// ====== DISTANCE ======
 long readDistanceCM() {
   digitalWrite(trigPin, LOW);
   delayMicroseconds(2);
@@ -165,34 +238,137 @@ long readDistanceCM() {
   return duration * 0.034 / 2;
 }
 
-// ==== ЭКРАН СТАРТА ====
+// ====== START SCREEN ======
 void bootScreen() {
   lcd.clear();
   lcd.setCursor(0, 0);
-  lcd.print("Smart Desk");
+  lcd.print("SMART DESK");
   lcd.setCursor(0, 1);
   lcd.print("Booting...");
-  delay(1200);
+
+  for (int t = 0; t < 10; t++) {
+    setRGB(0, 0, 255);
+    delay(60);
+    setRGB(0, 255, 0);
+    delay(60);
+  }
+  rgbOff();
 
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print("Waiting for you");
   lcd.setCursor(0, 1);
-  lcd.print("...");
-
-  for (int i = 0; i < 16; i++) {
-    lcd.setCursor(i, 1);
-    lcd.print(".");
-    delay(35);
-  }
-  delay(400);
+  lcd.print("Dist: --- cm");
 }
 
-// ==== МУЗЫКА + LED В ТАКТ ====
-void playThemeWithBlink() {
+// ====== YOUR LCD ANIMATION, WRAPPED ======
+void test() {
+  if (i == 8) {
+    j = 4; k = 4;
+  }
+  if (i == 7) {
+    j = 3; k = 4;
+  }
+  if (i == 6) {
+    j = 2; k = 4;
+  }
+  if (i == 5) {
+    j = 1; k = 4;
+  }
+  if (i == 4) {
+    j = 0; k = 4;
+  }
+  if (i == 3) {
+    j = 0; k = 3;
+  }
+  if (i == 2) {
+    j = 0; k = 2;
+  }
+  if (i == 1) {
+    j = 0; k = 1;
+  }
+  if (i == 0) {
+    j = 0; k = 0;
+  }
+}
+
+void teachMeAnimation() {
+  lcd.clear();
+  lcd.setCursor(4, 0);
+  lcd.print("Welcome");
+  lcd.setCursor(0, 1);
+  lcd.print("BY LIL_PUTE");
+  delay(1500);
+
+  for (int cycle = 0; cycle < 4; cycle++) {
+    randomnum = random(6, 9);
+
+    for (i = randomnum; i > 0; i = i - 3) {
+      int z = i;
+
+      test();
+      lcd.setCursor(7, 0); lcd.write(j);
+      lcd.setCursor(7, 1); lcd.write(k);
+      i--;
+      test();
+      lcd.setCursor(8, 0); lcd.write(j);
+      lcd.setCursor(8, 1); lcd.write(k);
+      lcd.setCursor(6, 0); lcd.write(j);
+      lcd.setCursor(6, 1); lcd.write(k);
+      i--;
+      test();
+      lcd.setCursor(9, 0); lcd.write(j);
+      lcd.setCursor(9, 1); lcd.write(k);
+      lcd.setCursor(5, 0); lcd.write(j);
+      lcd.setCursor(5, 1); lcd.write(k);
+
+      i--;
+      test();
+      lcd.setCursor(10, 0); lcd.write(j);
+      lcd.setCursor(10, 1); lcd.write(k);
+      lcd.setCursor(4, 0); lcd.write(j);
+      lcd.setCursor(4, 1); lcd.write(k);
+
+      i--;
+      test();
+      lcd.setCursor(11, 0); lcd.write(j);
+      lcd.setCursor(11, 1); lcd.write(k);
+      lcd.setCursor(3, 0); lcd.write(j);
+      lcd.setCursor(3, 1); lcd.write(k);
+
+      i--;
+      test();
+      lcd.setCursor(12, 0); lcd.write(j);
+      lcd.setCursor(12, 1); lcd.write(k);
+      lcd.setCursor(2, 0); lcd.write(j);
+      lcd.setCursor(2, 1); lcd.write(k);
+
+      i--;
+      test();
+      lcd.setCursor(13, 0); lcd.write(j);
+      lcd.setCursor(13, 1); lcd.write(k);
+      lcd.setCursor(1, 0); lcd.write(j);
+      lcd.setCursor(1, 1); lcd.write(k);
+
+      i--;
+      test();
+      lcd.setCursor(14, 0); lcd.write(j);
+      lcd.setCursor(14, 1); lcd.write(k);
+      lcd.setCursor(0, 0); lcd.write(j);
+      lcd.setCursor(0, 1); lcd.write(k);
+
+      delay(50);
+      lcd.clear();
+      i = z;
+    }
+  }
+}
+
+// ====== MUSIC + RGB ======
+void playThemeWithRGB() {
   lcd.clear();
   lcd.setCursor(0, 0);
-  lcd.print("Music starts");
+  lcd.print("Playing theme");
   lcd.setCursor(0, 1);
   lcd.print("Please wait...");
 
@@ -210,79 +386,98 @@ void playThemeWithBlink() {
     int note = melody[thisNote];
 
     if (note == REST) {
-      digitalWrite(ledPin, LOW);
+      rgbOff();
       noTone(buzzerPin);
       delay(noteDuration);
     } else {
-      digitalWrite(ledPin, HIGH);
+      colorStep(thisNote / 2);
       tone(buzzerPin, note, noteDuration * 9 / 10);
       delay(noteDuration * 9 / 10);
-
       noTone(buzzerPin);
-      digitalWrite(ledPin, LOW);
+      rgbOff();
       delay(noteDuration / 10);
     }
   }
 
   noTone(buzzerPin);
-  digitalWrite(ledPin, LOW);
+  rgbOff();
 }
 
-// ==== КРАСИВАЯ ЗАСТАВКА ====
-void welcomeAnimation() {
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("   WELCOME");
-  lcd.setCursor(0, 1);
-  lcd.print("   TO YOUR DESK");
-
-  for (int i = 0; i < 6; i++) {
-    digitalWrite(ledPin, HIGH);
-    delay(120);
-    digitalWrite(ledPin, LOW);
-    delay(120);
-  }
-
+// ====== FINAL WELCOME ======
+void finalWelcome() {
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print("Smart Desk Ready");
   lcd.setCursor(0, 1);
   lcd.print("Have a nice day");
-  delay(1200);
+
+  for (int x = 0; x < 4; x++) {
+    setRGB(255, 0, 120);
+    delay(120);
+    setRGB(0, 255, 255);
+    delay(120);
+  }
+  rgbOff();
 }
 
+// ====== FULL INTRO SEQUENCE ======
+void runIntroSequence() {
+  teachMeAnimation();
+  playThemeWithRGB();
+  finalWelcome();
+}
+
+// ====== SETUP ======
 void setup() {
   pinMode(trigPin, OUTPUT);
   pinMode(echoPin, INPUT);
-  pinMode(ledPin, OUTPUT);
   pinMode(buzzerPin, OUTPUT);
 
-  lcd.begin(16, 2);
+  pinMode(redPin, OUTPUT);
+  pinMode(greenPin, OUTPUT);
+  pinMode(bluePin, OUTPUT);
+
+  randomSeed(analogRead(A0));
+
+  lcd.init();
+  lcd.backlight();
+
+  lcd.createChar(4, customChar1);
+  lcd.createChar(3, customChar2);
+  lcd.createChar(2, customChar3);
+  lcd.createChar(1, customChar4);
+  lcd.createChar(0, customChar5);
+
   bootScreen();
 }
 
+// ====== LOOP ======
 void loop() {
   long d = readDistanceCM();
 
   lcd.setCursor(0, 1);
-  lcd.print("Dist:");
   if (d == -1) {
-    lcd.print("---");
-    lcd.print(" cm   ");
+    lcd.print("Dist: --- cm   ");
   } else {
+    lcd.print("Dist: ");
     lcd.print(d);
     lcd.print(" cm   ");
   }
 
   if (d != -1 && d < triggerDistanceCm && !triggered) {
     triggered = true;
-    playThemeWithBlink();
-    welcomeAnimation();
+    runIntroSequence();
   }
 
   if (d != -1 && d > resetDistanceCm) {
     triggered = false;
   }
 
-  delay(150);
+  if (!triggered && d != -1 && d < resetDistanceCm) {
+    setRGB(0, 0, 20);
+  } else if (!triggered) {
+    rgbOff();
+  }
+
+  delay(120);
 }
