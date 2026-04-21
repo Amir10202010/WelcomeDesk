@@ -13,11 +13,11 @@ const int greenPin = 7;
 const int bluePin  = 10;
 
 const int modeButtonPin   = 24;   // MODE / next menu
-const int actionButtonPin = 25;   // START / play / game
+const int actionButtonPin  = 25;   // START / play / game
 
-const int joyXPin = A1;           // future game control
-const int joyYPin = A2;           // future game control
-const int potPin  = A0;           // future difficulty / speed
+const int joyXPin = A1;
+const int joyYPin  = A2;
+const int potPin   = A0;
 
 const int triggerDistanceCm = 50;
 const int resetDistanceCm   = 70;
@@ -28,21 +28,24 @@ const bool commonAnode = false;
 // ===================== MODES =====================
 enum Mode {
   MODE_DISTANCE = 0,
-  MODE_MUSIC = 1,
-  MODE_GAME = 2
+  MODE_MUSIC    = 1,
+  MODE_GAME     = 2
 };
 
 Mode currentMode = MODE_DISTANCE;
 
 // ===================== BUTTON STATE =====================
-bool lastModeBtn = HIGH;
-bool lastActionBtn = HIGH;
-unsigned long lastModeDebounce = 0;
-unsigned long lastActionDebounce = 0;
+struct ButtonState {
+  bool stable = HIGH;
+  bool lastReading = HIGH;
+  unsigned long lastChange = 0;
+};
+
+ButtonState modeBtn;
+ButtonState actionBtn;
 const unsigned long debounceMs = 180;
 
 // ===================== MUSIC NOTES =====================
-#define REST 0
 #define NOTE_B0  31
 #define NOTE_C1  33
 #define NOTE_CS1 35
@@ -132,6 +135,7 @@ const unsigned long debounceMs = 180;
 #define NOTE_CS8 4435
 #define NOTE_D8  4699
 #define NOTE_DS8 4978
+#define REST 0
 
 int tempo = 144;
 int wholenote = (60000 * 4) / tempo;
@@ -204,6 +208,20 @@ void rgbColorForStep(int step) {
   }
 }
 
+// ===================== SMALL LCD HELPERS =====================
+void printLine(uint8_t row, const char *text) {
+  char buf[17];
+  snprintf(buf, sizeof(buf), "%-16.16s", text);
+  lcd.setCursor(0, row);
+  lcd.print(buf);
+}
+
+void makeStatusLine(char *out, const char *left, const char spinner) {
+  char buf[17];
+  snprintf(buf, sizeof(buf), "%-13.13s %c", left, spinner);
+  snprintf(out, 17, "%-16.16s", buf);
+}
+
 // ===================== SENSOR =====================
 long readDistanceCM() {
   digitalWrite(trigPin, LOW);
@@ -218,204 +236,215 @@ long readDistanceCM() {
   return duration * 0.034 / 2;
 }
 
-// ===================== LCD ANIMATION =====================
-void loadBarGlyphs() {
-  byte g0[8] = {0,0,0,0,0,0,0,0};
-  byte g1[8] = {0,0,0,0,0,0,0,31};
-  byte g2[8] = {0,0,0,0,0,0,31,31};
-  byte g3[8] = {0,0,0,0,0,31,31,31};
-  byte g4[8] = {0,0,0,0,31,31,31,31};
-  byte g5[8] = {0,0,0,31,31,31,31,31};
-  byte g6[8] = {0,0,31,31,31,31,31,31};
-  byte g7[8] = {0,31,31,31,31,31,31,31};
-
-  lcd.createChar(0, g0);
-  lcd.createChar(1, g1);
-  lcd.createChar(2, g2);
-  lcd.createChar(3, g3);
-  lcd.createChar(4, g4);
-  lcd.createChar(5, g5);
-  lcd.createChar(6, g6);
-  lcd.createChar(7, g7);
-}
-
-void drawWaveFrame(byte frame) {
-  for (int col = 0; col < 16; col++) {
-    byte levelTop = (frame + col) % 8;
-    lcd.setCursor(col, 0);
-    lcd.write(levelTop);
-  }
-}
-
-void renderIdleScreen(byte frame) {
-  drawWaveFrame(frame);
-  lcd.setCursor(0, 1);
-  lcd.print("Waiting...      ");
-}
-
-void renderMusicScreen(byte frame) {
-  drawWaveFrame(frame);
-  lcd.setCursor(0, 1);
-  lcd.print("Music mode      ");
-}
-
-void renderGameScreen(byte frame) {
-  drawWaveFrame(frame);
-  lcd.setCursor(0, 1);
-  lcd.print("Game: Dodge Duel");
-}
-
+// ===================== BOOT =====================
 void bootScreen() {
   lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("SMART DESK");
-  lcd.setCursor(0, 1);
-  lcd.print("Boot sequence");
+  printLine(0, "SMART DESK");
+  printLine(1, "Boot sequence");
 
   for (int i = 0; i < 12; i++) {
     lcd.setCursor(14, 1);
     lcd.print(">");
-    delay(100);
+    delay(90);
     lcd.setCursor(14, 1);
     lcd.print(" ");
-    delay(100);
+    delay(90);
   }
 
   lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Waiting...");
-  lcd.setCursor(0, 1);
-  lcd.print("Dist: --- cm");
+  printLine(0, "MODE: DISTANCE");
+  printLine(1, "Waiting...");
 }
 
-// ===================== MUSIC =====================
-void playThemeWithRGB() {
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Playing theme");
-  lcd.setCursor(0, 1);
-  lcd.print("Please wait...");
+// ===================== BUTTONS =====================
+bool buttonPressed(uint8_t pin, ButtonState &btn) {
+  bool reading = digitalRead(pin);
 
-  byte frame = 0;
+  if (reading != btn.lastReading) {
+    btn.lastChange = millis();
+    btn.lastReading = reading;
+  }
 
-  for (int thisNote = 0; thisNote < notes * 2; thisNote += 2) {
-    int divider = melody[thisNote + 1];
-    int noteDuration;
-
-    if (divider > 0) {
-      noteDuration = wholenote / divider;
-    } else {
-      noteDuration = wholenote / abs(divider);
-      noteDuration = noteDuration * 3 / 2;
-    }
-
-    int note = melody[thisNote];
-    int soundTime = noteDuration * 9 / 10;
-    int restTime  = noteDuration - soundTime;
-
-    if (note == REST) {
-      rgbOff();
-      noTone(buzzerPin);
-
-      unsigned long start = millis();
-      while (millis() - start < (unsigned long)noteDuration) {
-        renderMusicScreen(frame);
-        frame++;
-        delay(60);
-      }
-    } else {
-      rgbColorForStep(thisNote / 2);
-      tone(buzzerPin, note);
-
-      unsigned long start = millis();
-      while (millis() - start < (unsigned long)soundTime) {
-        renderMusicScreen(frame);
-        frame++;
-        delay(60);
-      }
-
-      noTone(buzzerPin);
-      rgbOff();
-
-      start = millis();
-      while (millis() - start < (unsigned long)restTime) {
-        renderMusicScreen(frame);
-        frame++;
-        delay(40);
-      }
+  if ((millis() - btn.lastChange) > debounceMs) {
+    if (reading != btn.stable) {
+      btn.stable = reading;
+      if (btn.stable == LOW) return true;   // pressed
     }
   }
 
+  return false;
+}
+
+void nextMode() {
+  if (currentMode == MODE_DISTANCE) currentMode = MODE_MUSIC;
+  else if (currentMode == MODE_MUSIC) currentMode = MODE_GAME;
+  else currentMode = MODE_DISTANCE;
+
+  lcd.clear();
+
+  if (currentMode == MODE_DISTANCE) printLine(0, "MODE: DISTANCE");
+  if (currentMode == MODE_MUSIC)    printLine(0, "MODE: MUSIC");
+  if (currentMode == MODE_GAME)     printLine(0, "MODE: GAME");
+
+  printLine(1, " ");
+}
+
+// ===================== MUSIC PLAYER STATE =====================
+bool musicPlaying = false;
+int musicIndex = 0;
+bool musicNeedSoundPhase = true;
+unsigned long musicPhaseEnd = 0;
+int currentNoteDuration = 0;
+byte musicFrame = 0;
+unsigned long lastMusicFrame = 0;
+byte musicSpinner = 0;
+
+void startMusic() {
+  musicPlaying = true;
+  musicIndex = 0;
+  musicNeedSoundPhase = true;
+  musicPhaseEnd = 0;
+  currentNoteDuration = 0;
+  musicFrame = 0;
+  musicSpinner = 0;
   noTone(buzzerPin);
   rgbOff();
+  lcd.clear();
+  printLine(0, "MODE: MUSIC");
+  printLine(1, "Starting...");
+}
+
+void stopMusic() {
+  musicPlaying = false;
+  noTone(buzzerPin);
+  rgbOff();
+}
+
+void updateMusicPlayer() {
+  if (!musicPlaying) return;
+
+  if (musicIndex >= notes * 2) {
+    stopMusic();
+    printLine(0, "MODE: MUSIC");
+    printLine(1, "Done");
+    return;
+  }
+
+  if (millis() - lastMusicFrame >= 80) {
+    lastMusicFrame = millis();
+
+    char line1[17];
+    byte percent = (byte)((musicIndex * 100UL) / (notes * 2));
+    byte bars = percent / 10;
+
+    char bar[11];
+    for (int i = 0; i < 10; i++) bar[i] = (i < bars) ? '=' : ' ';
+    bar[10] = '\0';
+
+    const char spinChars[] = {'|', '/', '-', '\\'};
+    char spinner = spinChars[musicSpinner % 4];
+    musicSpinner++;
+
+    snprintf(line1, sizeof(line1), "PLAY[%s] %3u%c", bar, percent, spinner);
+    printLine(1, line1);
+  }
+
+  if (millis() < musicPhaseEnd) return;
+
+  int note = melody[musicIndex];
+  int divider = melody[musicIndex + 1];
+
+  int noteDuration;
+  if (divider > 0) noteDuration = wholenote / divider;
+  else {
+    noteDuration = wholenote / abs(divider);
+    noteDuration = noteDuration * 3 / 2;
+  }
+
+  if (musicNeedSoundPhase) {
+    if (note == REST) {
+      noTone(buzzerPin);
+      rgbOff();
+      musicPhaseEnd = millis() + noteDuration;
+      musicIndex += 2;
+      return;
+    }
+
+    currentNoteDuration = noteDuration;
+    tone(buzzerPin, note);
+    rgbColorForStep(musicIndex / 2);
+
+    musicPhaseEnd = millis() + (noteDuration * 9L / 10L);
+    musicNeedSoundPhase = false;
+  } else {
+    noTone(buzzerPin);
+    rgbOff();
+
+    musicPhaseEnd = millis() + (currentNoteDuration / 10);
+    musicNeedSoundPhase = true;
+    musicIndex += 2;
+  }
 }
 
 // ===================== GAME SKELETON =====================
 void startDodgeDuel() {
   lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Dodge Duel");
-  lcd.setCursor(0, 1);
-  lcd.print("Coming next...");
-
-  // Here later we will add:
-  // - 8x8 matrix rendering
-  // - joystick movement
-  // - obstacle spawning
-  // - score on 3641AH
-  // - 2-player mode
+  printLine(0, "Dodge Duel");
+  printLine(1, "Coming next...");
 
   setRGB(0, 255, 255);
-  delay(500);
+  delay(400);
   setRGB(255, 0, 255);
-  delay(500);
+  delay(400);
   rgbOff();
 }
 
-void gameScreenIdle() {
-  static byte frame = 0;
+void updateGameScreen() {
+  static byte anim = 0;
   static unsigned long lastFrame = 0;
 
   if (millis() - lastFrame >= 120) {
     lastFrame = millis();
-    renderGameScreen(frame);
-    frame++;
+    anim = (anim + 1) % 4;
   }
 
   int joyX = analogRead(joyXPin);
   int joyY = analogRead(joyYPin);
   int potV = analogRead(potPin);
 
-  lcd.setCursor(0, 1);
-  char line[17];
-  snprintf(line, sizeof(line), "J:%4d %4d   ", joyX, joyY);
-  lcd.print(line);
+  printLine(0, "MODE: GAME");
 
-  // Pot is reserved for difficulty later
+  char line1[17];
+  const char spinChars[] = {'|', '/', '-', '\\'};
+  snprintf(line1, sizeof(line1), "J%4d%4d %c", joyX, joyY, spinChars[anim]);
+  printLine(1, line1);
+
   (void)potV;
 }
 
 // ===================== DISTANCE MODE =====================
-void distanceScreen() {
-  static byte frame = 0;
+void updateDistanceScreen() {
+  static byte anim = 0;
   static unsigned long lastFrame = 0;
-
-  long d = readDistanceCM();
 
   if (millis() - lastFrame >= 120) {
     lastFrame = millis();
-    renderIdleScreen(frame);
-    frame++;
+    anim = (anim + 1) % 4;
   }
 
-  lcd.setCursor(0, 1);
-  char line[17];
+  long d = readDistanceCM();
+
+  printLine(0, "MODE: DISTANCE");
+
+  char line1[17];
+  const char spinChars[] = {'|', '/', '-', '\\'};
+
   if (d == -1) {
-    snprintf(line, sizeof(line), "Dist: --- cm   ");
+    snprintf(line1, sizeof(line1), "Dist: --- cm  %c", spinChars[anim]);
   } else {
-    snprintf(line, sizeof(line), "Dist:%3ld cm    ", d);
+    snprintf(line1, sizeof(line1), "Dist:%3ld cm   %c", d, spinChars[anim]);
   }
-  lcd.print(line);
+  printLine(1, line1);
 
   if (d != -1 && d < 30) {
     setRGB(255, 120, 0);
@@ -426,47 +455,28 @@ void distanceScreen() {
   }
 }
 
-// ===================== MENU =====================
-void showModeHeader() {
-  lcd.setCursor(0, 0);
-  switch (currentMode) {
-    case MODE_DISTANCE:
-      lcd.print("MODE: DISTANCE ");
-      break;
-    case MODE_MUSIC:
-      lcd.print("MODE: MUSIC    ");
-      break;
-    case MODE_GAME:
-      lcd.print("MODE: GAME     ");
-      break;
-  }
-}
+// ===================== MUSIC MODE IDLE =====================
+void updateMusicIdleScreen() {
+  static byte anim = 0;
+  static unsigned long lastFrame = 0;
 
-void nextMode() {
-  if (currentMode == MODE_DISTANCE) currentMode = MODE_MUSIC;
-  else if (currentMode == MODE_MUSIC) currentMode = MODE_GAME;
-  else currentMode = MODE_DISTANCE;
-
-  lcd.clear();
-  showModeHeader();
-}
-
-bool buttonPressed(int pin, bool &lastState, unsigned long &lastDebounce) {
-  bool reading = digitalRead(pin);
-
-  if (reading != lastState) {
-    lastDebounce = millis();
+  if (millis() - lastFrame >= 140) {
+    lastFrame = millis();
+    anim = (anim + 1) % 4;
   }
 
-  if ((millis() - lastDebounce) > debounceMs) {
-    if (lastState == HIGH && reading == LOW) {
-      lastState = reading;
-      return true;
-    }
-  }
+  printLine(0, "MODE: MUSIC");
 
-  lastState = reading;
-  return false;
+  char line1[17];
+  const char spinChars[] = {'|', '/', '-', '\\'};
+
+  if (!musicPlaying) {
+    snprintf(line1, sizeof(line1), "A=PLAY     %c", spinChars[anim]);
+    printLine(1, line1);
+    setRGB(0, 0, 20);
+  } else {
+    updateMusicPlayer();
+  }
 }
 
 // ===================== SETUP =====================
@@ -484,60 +494,39 @@ void setup() {
   pinMode(actionButtonPin, INPUT_PULLUP);
 
   lcd.begin(16, 2);
-  loadBarGlyphs();
+
   bootScreen();
 
   setRGB(0, 0, 255);
-  delay(150);
+  delay(120);
   setRGB(0, 255, 0);
-  delay(150);
+  delay(120);
   setRGB(255, 0, 0);
-  delay(150);
+  delay(120);
   rgbOff();
 }
 
 // ===================== LOOP =====================
 void loop() {
-  if (buttonPressed(modeButtonPin, lastModeBtn, lastModeDebounce)) {
+  if (buttonPressed(modeButtonPin, modeBtn)) {
+    stopMusic();   // stop music if you leave the mode
     nextMode();
   }
 
   if (currentMode == MODE_DISTANCE) {
-    showModeHeader();
-    distanceScreen();
+    updateDistanceScreen();
   }
-
   else if (currentMode == MODE_MUSIC) {
-    showModeHeader();
-    renderMusicScreen((byte)(millis() / 120));
-
-    lcd.setCursor(0, 1);
-    lcd.print("A=PLAY MODE     ");
-
-    if (buttonPressed(actionButtonPin, lastActionBtn, lastActionDebounce)) {
-      playThemeWithRGB();
-      lcd.clear();
-      showModeHeader();
+    if (buttonPressed(actionButtonPin, actionBtn) && !musicPlaying) {
+      startMusic();
     }
-
-    // small idle glow
-    setRGB(0, 0, 20);
+    updateMusicIdleScreen();
   }
-
   else if (currentMode == MODE_GAME) {
-    showModeHeader();
-    gameScreenIdle();
-
-    lcd.setCursor(0, 1);
-    lcd.print("A=START GAME    ");
-
-    if (buttonPressed(actionButtonPin, lastActionBtn, lastActionDebounce)) {
+    if (buttonPressed(actionButtonPin, actionBtn)) {
       startDodgeDuel();
-      lcd.clear();
-      showModeHeader();
     }
-
-    // simple idle color for game mode
+    updateGameScreen();
     setRGB(20, 0, 20);
   }
 
