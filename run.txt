@@ -20,15 +20,14 @@ const int redPin   = 6;
 const int greenPin = 7;
 const int bluePin  = 10;
 
-const int modeButtonPin   = 24;   // MODE / next menu
-const int actionButtonPin = 25;   // ACTION / play / reset
+const int modeButtonPin   = 24;
+const int actionButtonPin  = 25;
 
 const int joyXPin = A1;
 const int joyYPin = A2;
 const int potPin  = A0;
 
 // Raw 8x8 matrix wiring assumed here.
-// If your matrix is MAX7219-based, this part must be changed.
 const byte rowPins[8] = {30, 31, 32, 33, 34, 35, 36, 37};
 const byte colPins[8] = {38, 39, 40, 41, 42, 43, 44, 45};
 
@@ -319,12 +318,11 @@ void renderMusicPlayScreen(byte frame, byte percent) {
 
 // ===================== MUSIC PLAYER STATE =====================
 bool musicPlaying = false;
-int musicIndex = 0;                 // pair index
+int musicIndex = 0;
 bool musicSoundPhase = true;
 unsigned long musicPhaseEnd = 0;
 unsigned long lastMusicLcd = 0;
 byte musicFrame = 0;
-byte musicSpinner = 0;
 
 void stopMusic() {
   musicPlaying = false;
@@ -339,7 +337,6 @@ void startMusic() {
   musicPhaseEnd = 0;
   lastMusicLcd = 0;
   musicFrame = 0;
-  musicSpinner = 0;
   lcd.clear();
 }
 
@@ -363,11 +360,8 @@ void updateMusicPlayer() {
     int divider = melody[musicIndex][1];
 
     unsigned long noteDuration;
-    if (divider > 0) {
-      noteDuration = wholenote / divider;
-    } else {
-      noteDuration = (wholenote / abs(divider)) * 3UL / 2UL;
-    }
+    if (divider > 0) noteDuration = wholenote / divider;
+    else noteDuration = (wholenote / abs(divider)) * 3UL / 2UL;
 
     if (musicSoundPhase) {
       if (note == REST) {
@@ -394,10 +388,8 @@ void updateMusicPlayer() {
   if (now - lastMusicLcd >= 110) {
     lastMusicLcd = now;
     musicFrame++;
-
     byte percent = (byte)((musicIndex * 100UL) / melodyLen);
     renderMusicPlayScreen(musicFrame, percent);
-    printLine(0, "MODE: MUSIC     ");
   }
 }
 
@@ -411,33 +403,46 @@ void updateMusicIdleScreen() {
     renderMusicIdleScreen(musicFrame);
   }
 
-  printLine(0, "MODE: MUSIC     ");
   setRGB(0, 0, 20);
 }
 
-// ===================== 8x8 MATRIX GAME =====================
+// ===================== 8x8 MATRIX GAME: DODGE DUEL =====================
 byte gameFrame[8];
 byte matrixRow = 0;
 unsigned long lastMatrixMux = 0;
 
-struct Obstacle {
-  int8_t x = -1;
-  int8_t y = -1;
-  bool active = false;
+enum HazardType {
+  HAZARD_BULLET = 0,
+  HAZARD_LASER  = 1
 };
 
-const byte maxObstacles = 4;
-Obstacle obstacles[maxObstacles];
+struct Hazard {
+  bool active = false;
+  HazardType type = HAZARD_BULLET;
+  int8_t x = 0;
+  int8_t y = 0;
+  int8_t speed = 1;
+};
+
+const byte maxHazards = 8;
+Hazard hazards[maxHazards];
 
 int playerX = 3;
-int lives = 3;
-unsigned long score = 0;
+int playerY = 7;
+int enemyX = 3;
+
+int gameLives = 3;
+unsigned long gameScore = 0;
+int gameLevel = 1;
+int gameDifficulty = 1;
 bool gameOver = false;
 
 unsigned long lastGameStep = 0;
 unsigned long lastSpawn = 0;
 unsigned long lastJoyMove = 0;
 unsigned long lastGameLcd = 0;
+unsigned long levelFlashUntil = 0;
+unsigned long lastEnemyMove = 0;
 
 void clearGameFrame() {
   for (byte r = 0; r < 8; r++) gameFrame[r] = 0;
@@ -475,70 +480,223 @@ void serviceMatrix() {
   digitalWrite(rowPins[matrixRow], HIGH);
 }
 
-void resetGame() {
+void resetDodgeDuel() {
   clearGameFrame();
 
-  for (byte i = 0; i < maxObstacles; i++) {
-    obstacles[i].active = false;
-    obstacles[i].x = -1;
-    obstacles[i].y = -1;
+  for (byte i = 0; i < maxHazards; i++) {
+    hazards[i].active = false;
+    hazards[i].type = HAZARD_BULLET;
+    hazards[i].x = 0;
+    hazards[i].y = 0;
+    hazards[i].speed = 1;
   }
 
   playerX = 3;
-  lives = 3;
-  score = 0;
+  playerY = 7;
+  enemyX = 3;
+
+  gameLives = 3;
+  gameScore = 0;
+  gameLevel = 1;
+  gameDifficulty = 1;
   gameOver = false;
+
   lastGameStep = 0;
   lastSpawn = 0;
   lastJoyMove = 0;
   lastGameLcd = 0;
+  levelFlashUntil = 0;
+  lastEnemyMove = 0;
 
   lcd.clear();
-  printLine(0, "MODE: GAME");
+  printLine(0, "DODGE DUEL");
   printLine(1, "A=RESET");
 }
 
-void spawnObstacle() {
-  for (byte i = 0; i < maxObstacles; i++) {
-    if (!obstacles[i].active) {
-      obstacles[i].active = true;
-      obstacles[i].x = random(0, 8);
-      obstacles[i].y = 0;
+void spawnHazard() {
+  for (byte i = 0; i < maxHazards; i++) {
+    if (!hazards[i].active) {
+      hazards[i].active = true;
+
+      int roll = random(100);
+      if (gameLevel >= 3 && roll < 28) {
+        hazards[i].type = HAZARD_LASER;
+        hazards[i].x = 0;
+        hazards[i].y = 0;
+        hazards[i].speed = 1 + (gameLevel >= 6 ? 1 : 0);
+      } else {
+        hazards[i].type = HAZARD_BULLET;
+        int spread = random(100);
+        if (spread < 55) hazards[i].x = enemyX;
+        else if (spread < 80) hazards[i].x = constrain(enemyX + (random(2) ? 1 : -1), 0, 7);
+        else hazards[i].x = random(0, 8);
+
+        hazards[i].y = 1;
+        hazards[i].speed = 1 + (gameLevel >= 5 ? 1 : 0) + (gameDifficulty >= 7 ? 1 : 0);
+      }
       return;
     }
   }
 }
 
-unsigned long speedFromPot() {
-  int pot = analogRead(potPin);
-  return map(pot, 0, 1023, 450, 130);
+void movePlayerFromJoystick() {
+  unsigned long now = millis();
+  if (now - lastJoyMove < 85) return;
+
+  int joyX = analogRead(joyXPin);
+  int joyY = analogRead(joyYPin);
+
+  bool moved = false;
+
+  if (joyX < 350 && playerX > 0) {
+    playerX--;
+    moved = true;
+  } else if (joyX > 650 && playerX < 7) {
+    playerX++;
+    moved = true;
+  }
+
+  if (joyY < 350 && playerY > 5) {
+    playerY--;
+    moved = true;
+  } else if (joyY > 650 && playerY < 7) {
+    playerY++;
+    moved = true;
+  }
+
+  if (moved) lastJoyMove = now;
 }
 
-unsigned long spawnFromPot() {
-  int pot = analogRead(potPin);
-  return map(pot, 0, 1023, 1200, 400);
+void updateEnemyPosition() {
+  unsigned long now = millis();
+  unsigned long moveInterval = map(gameDifficulty, 1, 9, 260, 110);
+  if (gameLevel >= 5) moveInterval -= 20;
+
+  if (now - lastEnemyMove >= moveInterval) {
+    lastEnemyMove = now;
+
+    if (enemyX < playerX) enemyX++;
+    else if (enemyX > playerX) enemyX--;
+    else {
+      if (random(100) < 35 && enemyX < 7) enemyX++;
+      else if (random(100) < 35 && enemyX > 0) enemyX--;
+    }
+  }
 }
 
 void buildGameFrame() {
   clearGameFrame();
 
-  for (byte i = 0; i < maxObstacles; i++) {
-    if (obstacles[i].active) {
-      setFramePixel(obstacles[i].x, obstacles[i].y, true);
+  // Enemy at top
+  setFramePixel(enemyX, 0, true);
+  if (enemyX + 1 <= 7) setFramePixel(enemyX + 1, 0, true);
+
+  // Hazards
+  for (byte i = 0; i < maxHazards; i++) {
+    if (!hazards[i].active) continue;
+
+    if (hazards[i].type == HAZARD_BULLET) {
+      setFramePixel(hazards[i].x, hazards[i].y, true);
+    } else if (hazards[i].type == HAZARD_LASER) {
+      for (byte x = 0; x < 8; x++) {
+        setFramePixel(x, hazards[i].y, true);
+      }
     }
   }
 
-  setFramePixel(playerX, 7, true);
+  // Player
+  setFramePixel(playerX, playerY, true);
+}
+
+void updateDifficultyAndLevel() {
+  int pot = analogRead(potPin);
+  gameDifficulty = map(pot, 0, 1023, 1, 9);
+
+  int newLevel = 1 + (int)(gameScore / 5UL);
+  if (newLevel < 1) newLevel = 1;
+  if (newLevel != gameLevel) {
+    gameLevel = newLevel;
+    levelFlashUntil = millis() + 900;
+  }
+}
+
+unsigned long hazardMoveInterval() {
+  int base = 420;
+  base -= (gameLevel - 1) * 28;
+  base -= (gameDifficulty - 1) * 20;
+  if (base < 90) base = 90;
+  return (unsigned long)base;
+}
+
+unsigned long spawnInterval() {
+  int base = 1200;
+  base -= (gameLevel - 1) * 70;
+  base -= (gameDifficulty - 1) * 45;
+  if (base < 240) base = 240;
+  return (unsigned long)base;
+}
+
+void updateHazards() {
+  unsigned long now = millis();
+  unsigned long moveInt = hazardMoveInterval();
+
+  if (now - lastGameStep >= moveInt) {
+    lastGameStep = now;
+
+    for (byte i = 0; i < maxHazards; i++) {
+      if (!hazards[i].active) continue;
+
+      if (hazards[i].type == HAZARD_BULLET) {
+        hazards[i].y += hazards[i].speed;
+        if (hazards[i].x == playerX && hazards[i].y == playerY) {
+          gameLives--;
+          hazards[i].active = false;
+          if (gameLives <= 0) gameOver = true;
+          continue;
+        }
+        if (hazards[i].y > 7) {
+          hazards[i].active = false;
+          gameScore++;
+        }
+      } else if (hazards[i].type == HAZARD_LASER) {
+        hazards[i].y += hazards[i].speed;
+
+        if (hazards[i].y == playerY) {
+          gameLives--;
+          hazards[i].active = false;
+          if (gameLives <= 0) gameOver = true;
+          continue;
+        }
+
+        if (hazards[i].y > 7) {
+          hazards[i].active = false;
+          gameScore += 2;
+        }
+      }
+    }
+  }
+
+  if (now - lastSpawn >= spawnInterval()) {
+    lastSpawn = now;
+    spawnHazard();
+
+    if (gameLevel >= 4 && random(100) < 35) {
+      spawnHazard();
+    }
+  }
 }
 
 void updateGameMode() {
   unsigned long now = millis();
 
   if (gameOver) {
-    printLine(0, "GAME OVER");
-    printLine(1, "A=RESET");
+    printLine(0, "DODGE DUEL");
+    printLine(1, "GAME OVER A=R");
     setRGB(80, 0, 0);
+
     clearGameFrame();
+    setFramePixel(2, 2, true);
+    setFramePixel(5, 2, true);
     setFramePixel(3, 3, true);
     setFramePixel(4, 3, true);
     setFramePixel(3, 4, true);
@@ -546,58 +704,29 @@ void updateGameMode() {
     return;
   }
 
-  if (now - lastJoyMove >= 90) {
-    lastJoyMove = now;
-    int joyX = analogRead(joyXPin);
-
-    if (joyX < 350 && playerX > 0) playerX--;
-    if (joyX > 650 && playerX < 7) playerX++;
-  }
-
-  unsigned long stepInterval = speedFromPot();
-  unsigned long spawnInterval = spawnFromPot();
-
-  if (now - lastSpawn >= spawnInterval) {
-    lastSpawn = now;
-    spawnObstacle();
-  }
-
-  if (now - lastGameStep >= stepInterval) {
-    lastGameStep = now;
-
-    for (byte i = 0; i < maxObstacles; i++) {
-      if (!obstacles[i].active) continue;
-
-      obstacles[i].y++;
-
-      if (obstacles[i].y >= 7) {
-        if (obstacles[i].x == playerX) {
-          lives--;
-          if (lives <= 0) {
-            gameOver = true;
-          }
-        } else {
-          score++;
-        }
-        obstacles[i].active = false;
-      }
-    }
-  }
-
+  updateDifficultyAndLevel();
+  movePlayerFromJoystick();
+  updateEnemyPosition();
+  updateHazards();
   buildGameFrame();
 
-  if (lives == 3) setRGB(0, 30, 0);
-  else if (lives == 2) setRGB(30, 20, 0);
-  else setRGB(40, 0, 0);
+  if (gameLives == 3) setRGB(0, 35, 0);
+  else if (gameLives == 2) setRGB(35, 22, 0);
+  else setRGB(45, 0, 0);
 
-  if (now - lastGameLcd >= 140) {
+  if (now - lastGameLcd >= 120) {
     lastGameLcd = now;
 
     char line0[17];
     char line1[17];
 
-    snprintf(line0, sizeof(line0), "GAME S:%lu", score);
-    snprintf(line1, sizeof(line1), "L:%d SP:%lu", lives, stepInterval);
+    if (now < levelFlashUntil) {
+      snprintf(line0, sizeof(line0), "LEVEL UP! L%d", gameLevel);
+    } else {
+      snprintf(line0, sizeof(line0), "DODGE DUEL L%d", gameLevel);
+    }
+
+    snprintf(line1, sizeof(line1), "D%d L%d S%lu", gameDifficulty, gameLives, gameScore);
 
     printLine(0, line0);
     printLine(1, line1);
@@ -648,10 +777,10 @@ void enterMode(Mode newMode) {
     printLine(0, "MODE: DISTANCE");
     printLine(1, "Ready");
   } else if (currentMode == MODE_MUSIC) {
-    printLine(0, "MODE: MUSIC");
-    printLine(1, "A=PLAY");
+    printLine(0, "MUSIC");
+    printLine(1, "A=PLAY Hedwig");
   } else {
-    resetGame();
+    resetDodgeDuel();
   }
 }
 
@@ -665,12 +794,12 @@ void handleButtons() {
     if (currentMode == MODE_MUSIC) {
       toggleMusic();
       if (!musicPlaying) {
-        printLine(0, "MODE: MUSIC");
-        printLine(1, "A=PLAY Hedwig...");
+        printLine(0, "MUSIC");
+        printLine(1, "A=PLAY Hedwig");
       }
     } else if (currentMode == MODE_GAME) {
       if (gameOver) {
-        resetGame();
+        resetDodgeDuel();
       }
     }
   }
