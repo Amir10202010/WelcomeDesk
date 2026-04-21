@@ -1,6 +1,14 @@
 #include <LiquidCrystal.h>
 
+// ===================== LCD =====================
 LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
+
+// ===================== IMPORTANT =====================
+// Buttons must be wired from pin -> button -> GND
+// because INPUT_PULLUP is used.
+
+// If your RGB LED is common anode, set true.
+const bool commonAnode = false;
 
 // ===================== PINS =====================
 const int trigPin = 22;
@@ -13,17 +21,16 @@ const int greenPin = 7;
 const int bluePin  = 10;
 
 const int modeButtonPin   = 24;   // MODE / next menu
-const int actionButtonPin  = 25;   // START / play / game
+const int actionButtonPin  = 25;   // ACTION / play / reset
 
 const int joyXPin = A1;
-const int joyYPin  = A2;
-const int potPin   = A0;
+const int joyYPin = A2;
+const int potPin  = A0;
 
-const int triggerDistanceCm = 50;
-const int resetDistanceCm   = 70;
-
-// If your RGB is common anode, set true
-const bool commonAnode = false;
+// Raw 8x8 matrix wiring assumed here.
+// If your matrix is MAX7219-based, this part must be changed.
+const byte rowPins[8] = {30, 31, 32, 33, 34, 35, 36, 37};
+const byte colPins[8] = {38, 39, 40, 41, 42, 43, 44, 45};
 
 // ===================== MODES =====================
 enum Mode {
@@ -34,7 +41,7 @@ enum Mode {
 
 Mode currentMode = MODE_DISTANCE;
 
-// ===================== BUTTON STATE =====================
+// ===================== BUTTON DEBOUNCE =====================
 struct ButtonState {
   bool stable = HIGH;
   bool lastReading = HIGH;
@@ -43,143 +50,16 @@ struct ButtonState {
 
 ButtonState modeBtn;
 ButtonState actionBtn;
-const unsigned long debounceMs = 180;
 
-// ===================== MUSIC NOTES =====================
-#define NOTE_B0  31
-#define NOTE_C1  33
-#define NOTE_CS1 35
-#define NOTE_D1  37
-#define NOTE_DS1 39
-#define NOTE_E1  41
-#define NOTE_F1  44
-#define NOTE_FS1 46
-#define NOTE_G1  49
-#define NOTE_GS1 52
-#define NOTE_A1  55
-#define NOTE_AS1 58
-#define NOTE_B1  62
-#define NOTE_C2  65
-#define NOTE_CS2 69
-#define NOTE_D2  73
-#define NOTE_DS2 78
-#define NOTE_E2  82
-#define NOTE_F2  87
-#define NOTE_FS2 93
-#define NOTE_G2  98
-#define NOTE_GS2 104
-#define NOTE_A2  110
-#define NOTE_AS2 117
-#define NOTE_B2  123
-#define NOTE_C3  131
-#define NOTE_CS3 139
-#define NOTE_D3  147
-#define NOTE_DS3 156
-#define NOTE_E3  165
-#define NOTE_F3  175
-#define NOTE_FS3 185
-#define NOTE_G3  196
-#define NOTE_GS3 208
-#define NOTE_A3  220
-#define NOTE_AS3 233
-#define NOTE_B3  247
-#define NOTE_C4  262
-#define NOTE_CS4 277
-#define NOTE_D4  294
-#define NOTE_DS4 311
-#define NOTE_E4  330
-#define NOTE_F4  349
-#define NOTE_FS4 370
-#define NOTE_G4  392
-#define NOTE_GS4 415
-#define NOTE_A4  440
-#define NOTE_AS4 466
-#define NOTE_B4  494
-#define NOTE_C5  523
-#define NOTE_CS5 554
-#define NOTE_D5  587
-#define NOTE_DS5 622
-#define NOTE_E5  659
-#define NOTE_F5  698
-#define NOTE_FS5 740
-#define NOTE_G5  784
-#define NOTE_GS5 831
-#define NOTE_A5  880
-#define NOTE_AS5 932
-#define NOTE_B5  988
-#define NOTE_C6  1047
-#define NOTE_CS6 1109
-#define NOTE_D6  1175
-#define NOTE_DS6 1245
-#define NOTE_E6  1319
-#define NOTE_F6  1397
-#define NOTE_FS6 1480
-#define NOTE_G6  1568
-#define NOTE_GS6 1661
-#define NOTE_A6  1760
-#define NOTE_AS6 1865
-#define NOTE_B6  1976
-#define NOTE_C7  2093
-#define NOTE_CS7 2217
-#define NOTE_D7  2349
-#define NOTE_DS7 2489
-#define NOTE_E7  2637
-#define NOTE_F7  2794
-#define NOTE_FS7 2960
-#define NOTE_G7  3136
-#define NOTE_GS7 3322
-#define NOTE_A7  3520
-#define NOTE_AS7 3729
-#define NOTE_B7  3951
-#define NOTE_C8  4186
-#define NOTE_CS8 4435
-#define NOTE_D8  4699
-#define NOTE_DS8 4978
-#define REST 0
+const unsigned long debounceMs = 40;
 
-int tempo = 144;
-int wholenote = (60000 * 4) / tempo;
-
-// Full Hedwig's Theme
-int melody[] = {
-  REST, 2, NOTE_D4, 4,
-  NOTE_G4, -4, NOTE_AS4, 8, NOTE_A4, 4,
-  NOTE_G4, 2, NOTE_D5, 4,
-  NOTE_C5, -2,
-  NOTE_A4, -2,
-  NOTE_G4, -4, NOTE_AS4, 8, NOTE_A4, 4,
-  NOTE_F4, 2, NOTE_GS4, 4,
-  NOTE_D4, -1,
-  NOTE_D4, 4,
-
-  NOTE_G4, -4, NOTE_AS4, 8, NOTE_A4, 4,
-  NOTE_G4, 2, NOTE_D5, 4,
-  NOTE_F5, 2, NOTE_E5, 4,
-  NOTE_DS5, 2, NOTE_B4, 4,
-  NOTE_DS5, -4, NOTE_D5, 8, NOTE_CS5, 4,
-  NOTE_CS4, 2, NOTE_B4, 4,
-  NOTE_G4, -1,
-  NOTE_AS4, 4,
-
-  NOTE_D5, 2, NOTE_AS4, 4,
-  NOTE_D5, 2, NOTE_AS4, 4,
-  NOTE_DS5, 2, NOTE_D5, 4,
-  NOTE_CS5, 2, NOTE_A4, 4,
-  NOTE_AS4, -4, NOTE_D5, 8, NOTE_CS5, 4,
-  NOTE_CS4, 2, NOTE_D4, 4,
-  NOTE_D5, -1,
-  REST, 4, NOTE_AS4, 4,
-
-  NOTE_D5, 2, NOTE_AS4, 4,
-  NOTE_D5, 2, NOTE_AS4, 4,
-  NOTE_F5, 2, NOTE_E5, 4,
-  NOTE_DS5, 2, NOTE_B4, 4,
-  NOTE_DS5, -4, NOTE_D5, 8, NOTE_CS5, 4,
-  NOTE_CS4, 2, NOTE_AS4, 4,
-  NOTE_G4, -1
-};
-
-int notes = sizeof(melody) / sizeof(melody[0]) / 2;
+// ===================== LCD HELPERS =====================
+void printLine(byte row, const char *text) {
+  char buf[17];
+  snprintf(buf, sizeof(buf), "%-16.16s", text);
+  lcd.setCursor(0, row);
+  lcd.print(buf);
+}
 
 // ===================== RGB HELPERS =====================
 void setRGB(int r, int g, int b) {
@@ -204,22 +84,8 @@ void rgbColorForStep(int step) {
     case 2: setRGB(0, 0, 255); break;
     case 3: setRGB(255, 255, 0); break;
     case 4: setRGB(0, 255, 255); break;
-    case 5: setRGB(255, 0, 255); break;
+    default:setRGB(255, 0, 255); break;
   }
-}
-
-// ===================== SMALL LCD HELPERS =====================
-void printLine(uint8_t row, const char *text) {
-  char buf[17];
-  snprintf(buf, sizeof(buf), "%-16.16s", text);
-  lcd.setCursor(0, row);
-  lcd.print(buf);
-}
-
-void makeStatusLine(char *out, const char *left, const char spinner) {
-  char buf[17];
-  snprintf(buf, sizeof(buf), "%-13.13s %c", left, spinner);
-  snprintf(out, 17, "%-16.16s", buf);
 }
 
 // ===================== SENSOR =====================
@@ -230,33 +96,13 @@ long readDistanceCM() {
   delayMicroseconds(10);
   digitalWrite(trigPin, LOW);
 
-  long duration = pulseIn(echoPin, HIGH, 30000);
+  unsigned long duration = pulseIn(echoPin, HIGH, 30000UL);
   if (duration == 0) return -1;
 
-  return duration * 0.034 / 2;
+  return (long)(duration * 0.034 / 2.0);
 }
 
-// ===================== BOOT =====================
-void bootScreen() {
-  lcd.clear();
-  printLine(0, "SMART DESK");
-  printLine(1, "Boot sequence");
-
-  for (int i = 0; i < 12; i++) {
-    lcd.setCursor(14, 1);
-    lcd.print(">");
-    delay(90);
-    lcd.setCursor(14, 1);
-    lcd.print(" ");
-    delay(90);
-  }
-
-  lcd.clear();
-  printLine(0, "MODE: DISTANCE");
-  printLine(1, "Waiting...");
-}
-
-// ===================== BUTTONS =====================
+// ===================== BUTTON READ =====================
 bool buttonPressed(uint8_t pin, ButtonState &btn) {
   bool reading = digitalRead(pin);
 
@@ -265,54 +111,71 @@ bool buttonPressed(uint8_t pin, ButtonState &btn) {
     btn.lastReading = reading;
   }
 
-  if ((millis() - btn.lastChange) > debounceMs) {
-    if (reading != btn.stable) {
-      btn.stable = reading;
-      if (btn.stable == LOW) return true;   // pressed
-    }
+  if ((millis() - btn.lastChange) >= debounceMs && reading != btn.stable) {
+    btn.stable = reading;
+    if (btn.stable == LOW) return true;   // press event
   }
 
   return false;
 }
 
-void nextMode() {
-  if (currentMode == MODE_DISTANCE) currentMode = MODE_MUSIC;
-  else if (currentMode == MODE_MUSIC) currentMode = MODE_GAME;
-  else currentMode = MODE_DISTANCE;
-
-  lcd.clear();
-
-  if (currentMode == MODE_DISTANCE) printLine(0, "MODE: DISTANCE");
-  if (currentMode == MODE_MUSIC)    printLine(0, "MODE: MUSIC");
-  if (currentMode == MODE_GAME)     printLine(0, "MODE: GAME");
-
-  printLine(1, " ");
+// ===================== MATH / MODE =====================
+Mode nextModeOf(Mode m) {
+  if (m == MODE_DISTANCE) return MODE_MUSIC;
+  if (m == MODE_MUSIC)    return MODE_GAME;
+  return MODE_DISTANCE;
 }
 
-// ===================== MUSIC PLAYER STATE =====================
+// ===================== BOOT =====================
+void bootScreen() {
+  lcd.clear();
+  printLine(0, "SMART WORK DESK");
+  printLine(1, "Booting...");
+
+  for (byte i = 0; i < 10; i++) {
+    lcd.setCursor(14, 1);
+    lcd.print((i % 2 == 0) ? ">" : " ");
+    delay(90);
+  }
+
+  lcd.clear();
+}
+
+// ===================== MUSIC =====================
+// Simple but pleasant tune.
+// Format: {NOTE, DIVIDER}
+#define REST 0
+#define NOTE_C4 262
+#define NOTE_D4 294
+#define NOTE_E4 330
+#define NOTE_F4 349
+#define NOTE_G4 392
+#define NOTE_A4 440
+#define NOTE_B4 494
+#define NOTE_C5 523
+#define NOTE_D5 587
+#define NOTE_E5 659
+#define NOTE_F5 698
+#define NOTE_G5 784
+
+const int melody[][2] = {
+  {NOTE_E4, 8}, {NOTE_G4, 8}, {NOTE_A4, 8}, {REST, 8},
+  {NOTE_A4, 8}, {NOTE_C5, 8}, {NOTE_B4, 8}, {REST, 8},
+  {NOTE_A4, 8}, {NOTE_G4, 8}, {NOTE_E4, 4}, {REST, 4},
+  {NOTE_E4, 8}, {NOTE_G4, 8}, {NOTE_A4, 8}, {NOTE_B4, 8},
+  {NOTE_C5, 4}, {REST, 4}
+};
+
+const int melodyLen = sizeof(melody) / sizeof(melody[0]);
+const int tempo = 132;
+const unsigned long wholenote = (60000UL * 4) / tempo;
+
 bool musicPlaying = false;
 int musicIndex = 0;
-bool musicNeedSoundPhase = true;
+bool musicSoundPhase = true;
 unsigned long musicPhaseEnd = 0;
-int currentNoteDuration = 0;
-byte musicFrame = 0;
-unsigned long lastMusicFrame = 0;
+unsigned long lastMusicLcd = 0;
 byte musicSpinner = 0;
-
-void startMusic() {
-  musicPlaying = true;
-  musicIndex = 0;
-  musicNeedSoundPhase = true;
-  musicPhaseEnd = 0;
-  currentNoteDuration = 0;
-  musicFrame = 0;
-  musicSpinner = 0;
-  noTone(buzzerPin);
-  rgbOff();
-  lcd.clear();
-  printLine(0, "MODE: MUSIC");
-  printLine(1, "Starting...");
-}
 
 void stopMusic() {
   musicPlaying = false;
@@ -320,162 +183,370 @@ void stopMusic() {
   rgbOff();
 }
 
-void updateMusicPlayer() {
-  if (!musicPlaying) return;
+void startMusic() {
+  musicPlaying = true;
+  musicIndex = 0;
+  musicSoundPhase = true;
+  musicPhaseEnd = 0;
+  lastMusicLcd = 0;
+  musicSpinner = 0;
+  lcd.clear();
+}
 
-  if (musicIndex >= notes * 2) {
+void toggleMusic() {
+  if (musicPlaying) stopMusic();
+  else startMusic();
+}
+
+void updateMusicPlayer() {
+  unsigned long now = millis();
+
+  if (musicIndex >= melodyLen) {
     stopMusic();
     printLine(0, "MODE: MUSIC");
-    printLine(1, "Done");
+    printLine(1, "DONE  A=PLAY");
     return;
   }
 
-  if (millis() - lastMusicFrame >= 80) {
-    lastMusicFrame = millis();
+  if (now >= musicPhaseEnd) {
+    int note = melody[musicIndex][0];
+    int divider = melody[musicIndex][1];
+
+    unsigned long noteDuration;
+    if (divider > 0) noteDuration = wholenote / divider;
+    else noteDuration = (wholenote / abs(divider)) * 3UL / 2UL;
+
+    if (musicSoundPhase) {
+      if (note == REST) {
+        noTone(buzzerPin);
+        rgbOff();
+        musicPhaseEnd = now + noteDuration;
+        musicSoundPhase = true;
+        musicIndex++;
+      } else {
+        tone(buzzerPin, note);
+        rgbColorForStep(musicIndex);
+        musicPhaseEnd = now + (noteDuration * 9UL / 10UL);
+        musicSoundPhase = false;
+      }
+    } else {
+      noTone(buzzerPin);
+      rgbOff();
+      musicPhaseEnd = now + (noteDuration / 10UL);
+      musicSoundPhase = true;
+      musicIndex++;
+    }
+  }
+
+  if (now - lastMusicLcd >= 120) {
+    lastMusicLcd = now;
 
     char line1[17];
-    byte percent = (byte)((musicIndex * 100UL) / (notes * 2));
-    byte bars = percent / 10;
-
     char bar[11];
-    for (int i = 0; i < 10; i++) bar[i] = (i < bars) ? '=' : ' ';
+    byte percent = (byte)((musicIndex * 100UL) / melodyLen);
+    byte filled = percent / 10;
+
+    for (byte i = 0; i < 10; i++) bar[i] = (i < filled) ? '=' : ' ';
     bar[10] = '\0';
 
     const char spinChars[] = {'|', '/', '-', '\\'};
-    char spinner = spinChars[musicSpinner % 4];
-    musicSpinner++;
+    char sp = spinChars[musicSpinner++ % 4];
 
-    snprintf(line1, sizeof(line1), "PLAY[%s] %3u%c", bar, percent, spinner);
+    snprintf(line1, sizeof(line1), "PLAY[%s] %3u%c", bar, percent, sp);
+    printLine(0, "MODE: MUSIC");
     printLine(1, line1);
   }
-
-  if (millis() < musicPhaseEnd) return;
-
-  int note = melody[musicIndex];
-  int divider = melody[musicIndex + 1];
-
-  int noteDuration;
-  if (divider > 0) noteDuration = wholenote / divider;
-  else {
-    noteDuration = wholenote / abs(divider);
-    noteDuration = noteDuration * 3 / 2;
-  }
-
-  if (musicNeedSoundPhase) {
-    if (note == REST) {
-      noTone(buzzerPin);
-      rgbOff();
-      musicPhaseEnd = millis() + noteDuration;
-      musicIndex += 2;
-      return;
-    }
-
-    currentNoteDuration = noteDuration;
-    tone(buzzerPin, note);
-    rgbColorForStep(musicIndex / 2);
-
-    musicPhaseEnd = millis() + (noteDuration * 9L / 10L);
-    musicNeedSoundPhase = false;
-  } else {
-    noTone(buzzerPin);
-    rgbOff();
-
-    musicPhaseEnd = millis() + (currentNoteDuration / 10);
-    musicNeedSoundPhase = true;
-    musicIndex += 2;
-  }
 }
 
-// ===================== GAME SKELETON =====================
-void startDodgeDuel() {
-  lcd.clear();
-  printLine(0, "Dodge Duel");
-  printLine(1, "Coming next...");
-
-  setRGB(0, 255, 255);
-  delay(400);
-  setRGB(255, 0, 255);
-  delay(400);
-  rgbOff();
-}
-
-void updateGameScreen() {
+void updateMusicIdleScreen() {
+  static unsigned long lastIdle = 0;
   static byte anim = 0;
-  static unsigned long lastFrame = 0;
+  unsigned long now = millis();
 
-  if (millis() - lastFrame >= 120) {
-    lastFrame = millis();
+  if (now - lastIdle >= 140) {
+    lastIdle = now;
     anim = (anim + 1) % 4;
   }
 
-  int joyX = analogRead(joyXPin);
-  int joyY = analogRead(joyYPin);
-  int potV = analogRead(potPin);
-
-  printLine(0, "MODE: GAME");
-
-  char line1[17];
   const char spinChars[] = {'|', '/', '-', '\\'};
-  snprintf(line1, sizeof(line1), "J%4d%4d %c", joyX, joyY, spinChars[anim]);
-  printLine(1, line1);
+  char line1[17];
+  snprintf(line1, sizeof(line1), "A=PLAY     %c", spinChars[anim]);
 
-  (void)potV;
+  printLine(0, "MODE: MUSIC");
+  printLine(1, line1);
+  setRGB(0, 0, 20);
+}
+
+// ===================== 8x8 MATRIX GAME =====================
+byte gameFrame[8];
+byte matrixRow = 0;
+unsigned long lastMatrixMux = 0;
+
+struct Obstacle {
+  int8_t x = -1;
+  int8_t y = -1;
+  bool active = false;
+};
+
+const byte maxObstacles = 4;
+Obstacle obstacles[maxObstacles];
+
+int playerX = 3;
+int lives = 3;
+unsigned long score = 0;
+bool gameOver = false;
+
+unsigned long lastGameStep = 0;
+unsigned long lastSpawn = 0;
+unsigned long lastJoyMove = 0;
+unsigned long lastGameLcd = 0;
+
+void clearGameFrame() {
+  for (byte r = 0; r < 8; r++) gameFrame[r] = 0;
+}
+
+void setFramePixel(int x, int y, bool on) {
+  if (x < 0 || x > 7 || y < 0 || y > 7) return;
+  if (on) gameFrame[y] |= (1 << (7 - x));
+  else    gameFrame[y] &= ~(1 << (7 - x));
+}
+
+void setupMatrixPins() {
+  for (byte i = 0; i < 8; i++) {
+    pinMode(rowPins[i], OUTPUT);
+    pinMode(colPins[i], OUTPUT);
+    digitalWrite(rowPins[i], LOW);
+    digitalWrite(colPins[i], HIGH); // off by default
+  }
+}
+
+void serviceMatrix() {
+  if (millis() - lastMatrixMux < 2) return;
+  lastMatrixMux = millis();
+
+  // turn off previous row
+  digitalWrite(rowPins[matrixRow], LOW);
+
+  // next row
+  matrixRow = (matrixRow + 1) & 0x07;
+
+  // set columns for that row
+  byte rowBits = gameFrame[matrixRow];
+  for (byte c = 0; c < 8; c++) {
+    bool on = rowBits & (1 << (7 - c));
+    digitalWrite(colPins[c], on ? LOW : HIGH);  // swap if your matrix is inverted
+  }
+
+  // turn row on
+  digitalWrite(rowPins[matrixRow], HIGH);
+}
+
+void resetGame() {
+  clearGameFrame();
+
+  for (byte i = 0; i < maxObstacles; i++) {
+    obstacles[i].active = false;
+    obstacles[i].x = -1;
+    obstacles[i].y = -1;
+  }
+
+  playerX = 3;
+  lives = 3;
+  score = 0;
+  gameOver = false;
+  lastGameStep = 0;
+  lastSpawn = 0;
+  lastJoyMove = 0;
+  lastGameLcd = 0;
+
+  lcd.clear();
+  printLine(0, "MODE: GAME");
+  printLine(1, "A=RESET");
+}
+
+void spawnObstacle() {
+  for (byte i = 0; i < maxObstacles; i++) {
+    if (!obstacles[i].active) {
+      obstacles[i].active = true;
+      obstacles[i].x = random(0, 8);
+      obstacles[i].y = 0;
+      return;
+    }
+  }
+}
+
+unsigned long speedFromPot() {
+  int pot = analogRead(potPin);
+  return map(pot, 0, 1023, 450, 130);   // higher pot = faster
+}
+
+unsigned long spawnFromPot() {
+  int pot = analogRead(potPin);
+  return map(pot, 0, 1023, 1200, 400);  // higher pot = more frequent
+}
+
+void buildGameFrame() {
+  clearGameFrame();
+
+  // obstacles
+  for (byte i = 0; i < maxObstacles; i++) {
+    if (obstacles[i].active) {
+      setFramePixel(obstacles[i].x, obstacles[i].y, true);
+    }
+  }
+
+  // player
+  setFramePixel(playerX, 7, true);
+}
+
+void updateGameMode() {
+  unsigned long now = millis();
+
+  if (gameOver) {
+    printLine(0, "GAME OVER");
+    printLine(1, "A=RESET");
+    setRGB(80, 0, 0);
+    clearGameFrame();
+    setFramePixel(3, 3, true);
+    setFramePixel(4, 3, true);
+    setFramePixel(3, 4, true);
+    setFramePixel(4, 4, true);
+    return;
+  }
+
+  // joystick move
+  if (now - lastJoyMove >= 90) {
+    lastJoyMove = now;
+    int joyX = analogRead(joyXPin);
+
+    if (joyX < 350 && playerX > 0) playerX--;
+    if (joyX > 650 && playerX < 7) playerX++;
+  }
+
+  unsigned long stepInterval = speedFromPot();
+  unsigned long spawnInterval = spawnFromPot();
+
+  // spawn obstacles
+  if (now - lastSpawn >= spawnInterval) {
+    lastSpawn = now;
+    spawnObstacle();
+  }
+
+  // move obstacles
+  if (now - lastGameStep >= stepInterval) {
+    lastGameStep = now;
+
+    for (byte i = 0; i < maxObstacles; i++) {
+      if (!obstacles[i].active) continue;
+
+      obstacles[i].y++;
+
+      if (obstacles[i].y >= 7) {
+        if (obstacles[i].x == playerX) {
+          lives--;
+          if (lives <= 0) {
+            gameOver = true;
+          }
+        } else {
+          score++;
+        }
+        obstacles[i].active = false;
+      }
+    }
+  }
+
+  buildGameFrame();
+
+  // RGB feedback
+  if (lives == 3) setRGB(0, 30, 0);
+  else if (lives == 2) setRGB(30, 20, 0);
+  else setRGB(40, 0, 0);
+
+  // LCD update
+  if (now - lastGameLcd >= 140) {
+    lastGameLcd = now;
+
+    char line0[17];
+    char line1[17];
+    unsigned long shownScore = score;
+
+    snprintf(line0, sizeof(line0), "GAME S:%lu", shownScore);
+    snprintf(line1, sizeof(line1), "L:%d SP:%lu", lives, stepInterval);
+
+    printLine(0, line0);
+    printLine(1, line1);
+  }
 }
 
 // ===================== DISTANCE MODE =====================
-void updateDistanceScreen() {
-  static byte anim = 0;
-  static unsigned long lastFrame = 0;
+unsigned long lastDistanceUpdate = 0;
+long lastDistance = -1;
 
-  if (millis() - lastFrame >= 120) {
-    lastFrame = millis();
-    anim = (anim + 1) % 4;
+void updateDistanceMode() {
+  unsigned long now = millis();
+
+  if (now - lastDistanceUpdate >= 120) {
+    lastDistanceUpdate = now;
+    lastDistance = readDistanceCM();
   }
-
-  long d = readDistanceCM();
-
-  printLine(0, "MODE: DISTANCE");
 
   char line1[17];
-  const char spinChars[] = {'|', '/', '-', '\\'};
+  printLine(0, "MODE: DISTANCE");
 
-  if (d == -1) {
-    snprintf(line1, sizeof(line1), "Dist: --- cm  %c", spinChars[anim]);
-  } else {
-    snprintf(line1, sizeof(line1), "Dist:%3ld cm   %c", d, spinChars[anim]);
-  }
-  printLine(1, line1);
-
-  if (d != -1 && d < 30) {
-    setRGB(255, 120, 0);
-  } else if (d != -1 && d < 70) {
-    setRGB(0, 0, 25);
-  } else {
+  if (lastDistance < 0) {
+    snprintf(line1, sizeof(line1), "Dist: --- cm");
     rgbOff();
+  } else {
+    if (lastDistance < 20) {
+      setRGB(255, 80, 0);
+    } else if (lastDistance < 50) {
+      setRGB(0, 0, 40);
+    } else {
+      rgbOff();
+    }
+
+    snprintf(line1, sizeof(line1), "Dist: %3ld cm", lastDistance);
+  }
+
+  printLine(1, line1);
+}
+
+// ===================== MODE SWITCH =====================
+void enterMode(Mode newMode) {
+  currentMode = newMode;
+  stopMusic();
+  clearGameFrame();
+  lcd.clear();
+
+  if (currentMode == MODE_DISTANCE) {
+    printLine(0, "MODE: DISTANCE");
+    printLine(1, "Ready");
+  } else if (currentMode == MODE_MUSIC) {
+    printLine(0, "MODE: MUSIC");
+    printLine(1, "A=PLAY");
+  } else {
+    resetGame();
   }
 }
 
-// ===================== MUSIC MODE IDLE =====================
-void updateMusicIdleScreen() {
-  static byte anim = 0;
-  static unsigned long lastFrame = 0;
-
-  if (millis() - lastFrame >= 140) {
-    lastFrame = millis();
-    anim = (anim + 1) % 4;
+// ===================== BUTTON HANDLER =====================
+void handleButtons() {
+  if (buttonPressed(modeButtonPin, modeBtn)) {
+    enterMode(nextModeOf(currentMode));
   }
 
-  printLine(0, "MODE: MUSIC");
-
-  char line1[17];
-  const char spinChars[] = {'|', '/', '-', '\\'};
-
-  if (!musicPlaying) {
-    snprintf(line1, sizeof(line1), "A=PLAY     %c", spinChars[anim]);
-    printLine(1, line1);
-    setRGB(0, 0, 20);
-  } else {
-    updateMusicPlayer();
+  if (buttonPressed(actionButtonPin, actionBtn)) {
+    if (currentMode == MODE_MUSIC) {
+      toggleMusic();
+      if (!musicPlaying) {
+        printLine(0, "MODE: MUSIC");
+        printLine(1, "A=PLAY");
+      }
+    } else if (currentMode == MODE_GAME) {
+      if (gameOver) {
+        resetGame();
+      }
+    }
   }
 }
 
@@ -494,41 +565,34 @@ void setup() {
   pinMode(actionButtonPin, INPUT_PULLUP);
 
   lcd.begin(16, 2);
+  lcd.clear();
+
+  setupMatrixPins();
+
+  randomSeed(analogRead(A15) ^ micros());
 
   bootScreen();
+  enterMode(MODE_DISTANCE);
 
-  setRGB(0, 0, 255);
-  delay(120);
-  setRGB(0, 255, 0);
-  delay(120);
-  setRGB(255, 0, 0);
-  delay(120);
+  // startup RGB animation
+  setRGB(0, 0, 255); delay(110);
+  setRGB(0, 255, 0); delay(110);
+  setRGB(255, 0, 0); delay(110);
   rgbOff();
 }
 
 // ===================== LOOP =====================
 void loop() {
-  if (buttonPressed(modeButtonPin, modeBtn)) {
-    stopMusic();   // stop music if you leave the mode
-    nextMode();
-  }
+  handleButtons();
 
   if (currentMode == MODE_DISTANCE) {
-    updateDistanceScreen();
-  }
-  else if (currentMode == MODE_MUSIC) {
-    if (buttonPressed(actionButtonPin, actionBtn) && !musicPlaying) {
-      startMusic();
-    }
-    updateMusicIdleScreen();
-  }
-  else if (currentMode == MODE_GAME) {
-    if (buttonPressed(actionButtonPin, actionBtn)) {
-      startDodgeDuel();
-    }
-    updateGameScreen();
-    setRGB(20, 0, 20);
+    updateDistanceMode();
+  } else if (currentMode == MODE_MUSIC) {
+    if (musicPlaying) updateMusicPlayer();
+    else updateMusicIdleScreen();
+  } else if (currentMode == MODE_GAME) {
+    updateGameMode();
   }
 
-  delay(20);
+  serviceMatrix();
 }
