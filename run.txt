@@ -2,24 +2,46 @@
 
 LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
 
-// ====== ПИНЫ ======
+// ===================== PINS =====================
 const int trigPin = 22;
 const int echoPin = 23;
+
 const int buzzerPin = 8;
 
-const int redPin = 6;
+const int redPin   = 6;
 const int greenPin = 7;
-const int bluePin = 10;
+const int bluePin  = 10;
+
+const int modeButtonPin   = 24;   // MODE / next menu
+const int actionButtonPin = 25;   // START / play / game
+
+const int joyXPin = A1;           // future game control
+const int joyYPin = A2;           // future game control
+const int potPin  = A0;           // future difficulty / speed
 
 const int triggerDistanceCm = 50;
-const int resetDistanceCm = 70;
+const int resetDistanceCm   = 70;
 
-// Поставь true, если RGB common anode
+// If your RGB is common anode, set true
 const bool commonAnode = false;
 
-bool triggered = false;
+// ===================== MODES =====================
+enum Mode {
+  MODE_DISTANCE = 0,
+  MODE_MUSIC = 1,
+  MODE_GAME = 2
+};
 
-// ====== НОТЫ ======
+Mode currentMode = MODE_DISTANCE;
+
+// ===================== BUTTON STATE =====================
+bool lastModeBtn = HIGH;
+bool lastActionBtn = HIGH;
+unsigned long lastModeDebounce = 0;
+unsigned long lastActionDebounce = 0;
+const unsigned long debounceMs = 180;
+
+// ===================== MUSIC NOTES =====================
 #define REST 0
 #define NOTE_B0  31
 #define NOTE_C1  33
@@ -114,7 +136,7 @@ bool triggered = false;
 int tempo = 144;
 int wholenote = (60000 * 4) / tempo;
 
-// Полная Hedwig's Theme
+// Full Hedwig's Theme
 int melody[] = {
   REST, 2, NOTE_D4, 4,
   NOTE_G4, -4, NOTE_AS4, 8, NOTE_A4, 4,
@@ -155,7 +177,7 @@ int melody[] = {
 
 int notes = sizeof(melody) / sizeof(melody[0]) / 2;
 
-// ====== RGB ======
+// ===================== RGB HELPERS =====================
 void setRGB(int r, int g, int b) {
   if (commonAnode) {
     r = 255 - r;
@@ -182,7 +204,7 @@ void rgbColorForStep(int step) {
   }
 }
 
-// ====== ДАТЧИК ======
+// ===================== SENSOR =====================
 long readDistanceCM() {
   digitalWrite(trigPin, LOW);
   delayMicroseconds(2);
@@ -196,7 +218,7 @@ long readDistanceCM() {
   return duration * 0.034 / 2;
 }
 
-// ====== LCD АНИМАЦИЯ ======
+// ===================== LCD ANIMATION =====================
 void loadBarGlyphs() {
   byte g0[8] = {0,0,0,0,0,0,0,0};
   byte g1[8] = {0,0,0,0,0,0,0,31};
@@ -226,19 +248,21 @@ void drawWaveFrame(byte frame) {
 }
 
 void renderIdleScreen(byte frame) {
-  lcd.setCursor(0, 0);
   drawWaveFrame(frame);
-
   lcd.setCursor(0, 1);
   lcd.print("Waiting...      ");
 }
 
 void renderMusicScreen(byte frame) {
-  lcd.setCursor(0, 0);
   drawWaveFrame(frame);
-
   lcd.setCursor(0, 1);
-  lcd.print("Playing music   ");
+  lcd.print("Music mode      ");
+}
+
+void renderGameScreen(byte frame) {
+  drawWaveFrame(frame);
+  lcd.setCursor(0, 1);
+  lcd.print("Game: Dodge Duel");
 }
 
 void bootScreen() {
@@ -264,11 +288,13 @@ void bootScreen() {
   lcd.print("Dist: --- cm");
 }
 
-// ====== МУЗЫКА + АНИМАЦИЯ ВМЕСТЕ ======
+// ===================== MUSIC =====================
 void playThemeWithRGB() {
   lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Playing theme");
   lcd.setCursor(0, 1);
-  lcd.print("Playing music   ");
+  lcd.print("Please wait...");
 
   byte frame = 0;
 
@@ -285,7 +311,7 @@ void playThemeWithRGB() {
 
     int note = melody[thisNote];
     int soundTime = noteDuration * 9 / 10;
-    int restTime = noteDuration - soundTime;
+    int restTime  = noteDuration - soundTime;
 
     if (note == REST) {
       rgbOff();
@@ -295,7 +321,7 @@ void playThemeWithRGB() {
       while (millis() - start < (unsigned long)noteDuration) {
         renderMusicScreen(frame);
         frame++;
-        delay(80);
+        delay(60);
       }
     } else {
       rgbColorForStep(thisNote / 2);
@@ -324,34 +350,138 @@ void playThemeWithRGB() {
   rgbOff();
 }
 
-// ====== ПРИВЕТСТВИЕ ======
-void welcomeAnimation() {
+// ===================== GAME SKELETON =====================
+void startDodgeDuel() {
   lcd.clear();
   lcd.setCursor(0, 0);
-  lcd.print("WELCOME BACK");
+  lcd.print("Dodge Duel");
   lcd.setCursor(0, 1);
-  lcd.print("Smart Desk Ready");
+  lcd.print("Coming next...");
 
-  for (int i = 0; i < 6; i++) {
-    setRGB(255, 0, 100);
-    delay(120);
-    setRGB(0, 255, 255);
-    delay(120);
-  }
+  // Here later we will add:
+  // - 8x8 matrix rendering
+  // - joystick movement
+  // - obstacle spawning
+  // - score on 3641AH
+  // - 2-player mode
 
+  setRGB(0, 255, 255);
+  delay(500);
+  setRGB(255, 0, 255);
+  delay(500);
   rgbOff();
-  delay(1000);
 }
 
-// ====== SETUP ======
+void gameScreenIdle() {
+  static byte frame = 0;
+  static unsigned long lastFrame = 0;
+
+  if (millis() - lastFrame >= 120) {
+    lastFrame = millis();
+    renderGameScreen(frame);
+    frame++;
+  }
+
+  int joyX = analogRead(joyXPin);
+  int joyY = analogRead(joyYPin);
+  int potV = analogRead(potPin);
+
+  lcd.setCursor(0, 1);
+  char line[17];
+  snprintf(line, sizeof(line), "J:%4d %4d   ", joyX, joyY);
+  lcd.print(line);
+
+  // Pot is reserved for difficulty later
+  (void)potV;
+}
+
+// ===================== DISTANCE MODE =====================
+void distanceScreen() {
+  static byte frame = 0;
+  static unsigned long lastFrame = 0;
+
+  long d = readDistanceCM();
+
+  if (millis() - lastFrame >= 120) {
+    lastFrame = millis();
+    renderIdleScreen(frame);
+    frame++;
+  }
+
+  lcd.setCursor(0, 1);
+  char line[17];
+  if (d == -1) {
+    snprintf(line, sizeof(line), "Dist: --- cm   ");
+  } else {
+    snprintf(line, sizeof(line), "Dist:%3ld cm    ", d);
+  }
+  lcd.print(line);
+
+  if (d != -1 && d < 30) {
+    setRGB(255, 120, 0);
+  } else if (d != -1 && d < 70) {
+    setRGB(0, 0, 25);
+  } else {
+    rgbOff();
+  }
+}
+
+// ===================== MENU =====================
+void showModeHeader() {
+  lcd.setCursor(0, 0);
+  switch (currentMode) {
+    case MODE_DISTANCE:
+      lcd.print("MODE: DISTANCE ");
+      break;
+    case MODE_MUSIC:
+      lcd.print("MODE: MUSIC    ");
+      break;
+    case MODE_GAME:
+      lcd.print("MODE: GAME     ");
+      break;
+  }
+}
+
+void nextMode() {
+  if (currentMode == MODE_DISTANCE) currentMode = MODE_MUSIC;
+  else if (currentMode == MODE_MUSIC) currentMode = MODE_GAME;
+  else currentMode = MODE_DISTANCE;
+
+  lcd.clear();
+  showModeHeader();
+}
+
+bool buttonPressed(int pin, bool &lastState, unsigned long &lastDebounce) {
+  bool reading = digitalRead(pin);
+
+  if (reading != lastState) {
+    lastDebounce = millis();
+  }
+
+  if ((millis() - lastDebounce) > debounceMs) {
+    if (lastState == HIGH && reading == LOW) {
+      lastState = reading;
+      return true;
+    }
+  }
+
+  lastState = reading;
+  return false;
+}
+
+// ===================== SETUP =====================
 void setup() {
   pinMode(trigPin, OUTPUT);
   pinMode(echoPin, INPUT);
+
   pinMode(buzzerPin, OUTPUT);
 
   pinMode(redPin, OUTPUT);
   pinMode(greenPin, OUTPUT);
   pinMode(bluePin, OUTPUT);
+
+  pinMode(modeButtonPin, INPUT_PULLUP);
+  pinMode(actionButtonPin, INPUT_PULLUP);
 
   lcd.begin(16, 2);
   loadBarGlyphs();
@@ -366,35 +496,49 @@ void setup() {
   rgbOff();
 }
 
-// ====== LOOP ======
+// ===================== LOOP =====================
 void loop() {
-  long d = readDistanceCM();
-
-  if (d != -1 && d < triggerDistanceCm && !triggered) {
-    triggered = true;
-    playThemeWithRGB();
-    welcomeAnimation();
+  if (buttonPressed(modeButtonPin, lastModeBtn, lastModeDebounce)) {
+    nextMode();
   }
 
-  if (d != -1 && d > resetDistanceCm) {
-    triggered = false;
+  if (currentMode == MODE_DISTANCE) {
+    showModeHeader();
+    distanceScreen();
   }
 
-  if (!triggered) {
-    static byte frame = 0;
-    static unsigned long lastFrame = 0;
+  else if (currentMode == MODE_MUSIC) {
+    showModeHeader();
+    renderMusicScreen((byte)(millis() / 120));
 
-    if (millis() - lastFrame >= 120) {
-      lastFrame = millis();
-      renderIdleScreen(frame);
-      frame++;
+    lcd.setCursor(0, 1);
+    lcd.print("A=PLAY MODE     ");
+
+    if (buttonPressed(actionButtonPin, lastActionBtn, lastActionDebounce)) {
+      playThemeWithRGB();
+      lcd.clear();
+      showModeHeader();
     }
 
-    if (d != -1 && d < resetDistanceCm) {
-      setRGB(0, 0, 20);
-    } else {
-      rgbOff();
+    // small idle glow
+    setRGB(0, 0, 20);
+  }
+
+  else if (currentMode == MODE_GAME) {
+    showModeHeader();
+    gameScreenIdle();
+
+    lcd.setCursor(0, 1);
+    lcd.print("A=START GAME    ");
+
+    if (buttonPressed(actionButtonPin, lastActionBtn, lastActionDebounce)) {
+      startDodgeDuel();
+      lcd.clear();
+      showModeHeader();
     }
+
+    // simple idle color for game mode
+    setRGB(20, 0, 20);
   }
 
   delay(20);
